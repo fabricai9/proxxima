@@ -1,0 +1,23 @@
+{
+  "name": "trilha-portal-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Casca nativa dos portais Trilha, um build por perfil",
+  "scripts": {
+    "montar": "node scripts/montar.js",
+    "versao:correcao": "npm version patch --no-git-tag-version",
+    "versao:menor": "npm version minor --no-git-tag-version",
+    "versao:maior": "npm version major --no-git-tag-version"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.1.0",
+    "@capacitor/android": "^6.1.0",
+    "@capacitor/ios": "^6.1.0",
+    "@capacitor/cli": "^6.1.0",
+    "@capacitor/splash-screen": "^6.0.0",
+    "@capacitor/status-bar": "^6.0.0",
+    "@capacitor/push-notifications": "^6.0.0",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/network": "^6.0.0"
+  }
+}

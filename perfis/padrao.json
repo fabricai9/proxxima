@@ -1,0 +1,38 @@
+{
+  "chave": "padrao",
+  "empresa": "Proxxima",
+
+  "app": {
+    "nome": "Minha Proxxima",
+    "nomeCurto": "Proxxima",
+    "applicationId": "br.com.proxxima.portal",
+    "bundleId": "br.com.portal.proxxima",
+    "userAgent": "TrilhaApp/Proxxima"
+  },
+
+  "ios": {
+    "version": "400001",
+    "build": "1"
+  },
+
+  "url": "https://grupozaaz.trilha.app/portal",
+
+  "cores": {
+    "primaria": "#a90059",
+    "fundo": "#f6f8fb",
+    "barraStatus": "#a90059",
+    "splash": "#a90059"
+  },
+
+  "suporte": {
+    "telefone": "0800 083 1155",
+    "whatsapp": "558000831155"
+  },
+
+  "_comentarios": {
+    "url": "Sem ?p= porque este é o perfil PADRÃO — o portal resolve nele quando não há parâmetro. Quando o domínio próprio rotear, aqui vira https://portal.proxxima.net e o parâmetro desaparece de vez.",
+    "applicationId": "PRECISA ser o mesmo do app já publicado, se a ideia for substituí-lo. Identificador diferente vira app novo na loja, e os usuários não recebem como atualização.",
+    "suporte": "Exibido na tela de sem-internet, que é o único momento em que o app não consegue ler a configuração do portal. Espelha portal_config id=1 (suporte_telefone / suporte_whatsapp). Divergir daqui só aparece quando o cliente está offline — ninguém reclama por dentro do app, então a checagem é no build (montar.js).",
+    "whatsapp": "É o próprio 0800 com prefixo 55. 0800 não recebe WhatsApp. Hoje o offline.html não usa este valor, mas não o transforme em link wa.me sem trocar por um número que atenda."
+  }
+}

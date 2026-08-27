@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Sem conexão</title>
+<!--
+  Tela de sem-internet.
+
+  É o ÚNICO momento em que o app não consegue ler nada do portal — por isso o
+  telefone e o WhatsApp vêm gravados aqui no build, e não da API. Cliente sem
+  internet precisa de um número para ligar, e buscá-lo na rede seria circular.
+
+  Os valores entre chaves duplas são substituídos pelo montar.js a partir do
+  JSON do perfil.
+-->
+<style>
+  :root{ --pri: {{COR_PRIMARIA}}; --fundo: {{COR_FUNDO}}; }
+  *{ box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent; }
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    background:var(--fundo); color:#1a1523; min-height:100vh;
+    display:flex; align-items:center; justify-content:center;
+    padding:28px 22px; padding-top:max(28px, env(safe-area-inset-top));
+    padding-bottom:max(28px, env(safe-area-inset-bottom));
+  }
+  .caixa{ max-width:380px; width:100%; text-align:center; }
+  .ic{
+    width:84px; height:84px; margin:0 auto 22px; border-radius:26px;
+    background:#fff; display:flex; align-items:center; justify-content:center;
+    box-shadow:0 6px 20px rgba(0,0,0,.07);
+  }
+  .ic svg{ width:40px; height:40px; stroke:var(--pri); }
+  h1{ font-size:21px; font-weight:800; margin-bottom:9px; }
+  p{ font-size:15px; line-height:1.55; color:#6b6475; margin-bottom:26px; }
+  .btn{
+    display:flex; align-items:center; justify-content:center; gap:9px;
+    width:100%; height:52px; border-radius:14px; border:none;
+    font-size:15.5px; font-weight:700; cursor:pointer; text-decoration:none;
+    margin-bottom:11px; font-family:inherit;
+  }
+  .btn-pri{ background:var(--pri); color:#fff; }
+  .btn-sec{ background:#fff; color:var(--pri); border:1.5px solid #e7dfec; }
+  .btn svg{ width:19px; height:19px; }
+  .dica{ font-size:13px; color:#a99fb2; margin-top:20px; line-height:1.5; }
+</style>
+</head>
+<body>
+  <div class="caixa">
+    <div class="ic">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+        <path d="M1 1l22 22M16.72 11.06A10.94 10.94 0 0119 12.55M5 12.55a10.94 10.94 0 015.17-2.39M10.71 5.05A16 16 0 0122.58 9M1.42 9a15.91 15.91 0 014.7-2.88M8.53 16.11a6 6 0 016.95 0M12 20h.01"/>
+      </svg>
+    </div>
+
+    <h1>Você está sem internet</h1>
+    <p>
+      Não conseguimos carregar o aplicativo agora. Verifique o Wi-Fi ou os dados
+      móveis e tente de novo.
+    </p>
+
+    <button class="btn btn-pri" onclick="tentar(this)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M23 4v6h-6M1 20v-6h6M20.49 9A9 9 0 005.64 5.64L1 10m22 4l-4.64 4.36A9 9 0 013.51 15"/>
+      </svg>
+      Tentar novamente
+    </button>
+
+    <!-- O telefone é o caminho de saída de quem está sem internet no celular
+         inteiro, não só no app. Fica em segundo plano, mas presente. -->
+    <a class="btn btn-sec" href="tel:{{TELEFONE_LIMPO}}">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+        <path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07 19.5 19.5 0 01-6-6 19.79 19.79 0 01-3.07-8.67A2 2 0 014.11 2h3a2 2 0 012 1.72c.13.96.36 1.9.7 2.81a2 2 0 01-.45 2.11L8.09 9.91a16 16 0 006 6l1.27-1.27a2 2 0 012.11-.45c.9.34 1.85.57 2.81.7A2 2 0 0122 16.92z"/>
+      </svg>
+      Ligar para {{TELEFONE}}
+    </a>
+
+    <div class="dica" id="dica"></div>
+  </div>
+
+<script>
+/* Recarrega o app. Se a conexão voltou, o portal abre; se não, esta tela
+   reaparece — o que é informação, não falha. */
+function tentar(btn){
+  btn.disabled = true;
+  btn.style.opacity = '.6';
+  location.replace('{{URL}}');
+}
+
+/* Detecta a volta da conexão e recarrega sozinho: o cliente que entrou no
+   túnel e saiu não deveria precisar tocar em nada. */
+window.addEventListener('online', () => location.replace('{{URL}}'));
+
+/* Aviso só quando o aparelho se diz online mas o portal não respondeu — aí o
+   problema não é do cliente, e dizer "verifique seu Wi-Fi" seria enganoso. */
+if (navigator.onLine) {
+  document.getElementById('dica').textContent =
+    'Seu aparelho está conectado, mas não conseguimos falar com nossos servidores. Isso costuma ser passageiro.';
+}
+</script>
+</body>
+</html>

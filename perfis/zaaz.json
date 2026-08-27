@@ -1,0 +1,33 @@
+{
+  "chave": "zaaz",
+  "empresa": "ZaaZ",
+
+  "app": {
+    "nome": "Minha ZaaZ",
+    "nomeCurto": "ZaaZ",
+    "applicationId": "br.com.zaaztelecom.portal",
+    "bundleId": "br.com.zaaztelecom.portal",
+    "userAgent": "TrilhaApp/ZaaZ"
+  },
+
+  "url": "https://grupozaaz.trilha.app/portal?p=zaaz",
+
+  "cores": {
+    "primaria": "#273687",
+    "fundo": "#f6f8fb",
+    "barraStatus": "#273687",
+    "splash": "#273687"
+  },
+
+  "suporte": {
+    "telefone": "0800 494 9999",
+    "whatsapp": "558004949999"
+  },
+
+  "_comentarios": {
+    "url": "O ?p=zaaz é TEMPORÁRIO. Quando portal.zaaztelecom.com.br rotear até o tenant, troque por ele e o parâmetro sai — inclusive do portal.php, onde hoje a api() precisa repassá-lo em toda chamada.",
+    "cores": "Devem bater com o que está no portal_config do perfil 2. Divergência aparece na abertura: a splash pisca numa cor e o portal carrega noutra.",
+    "suporte": "Espelha portal_config id=2 (suporte_telefone / suporte_whatsapp). Exibido na tela de sem-internet, que é o único momento em que o app não consegue ler a configuração do portal.",
+    "whatsapp": "É o próprio 0800 com prefixo 55. 0800 não recebe WhatsApp. Hoje o offline.html não usa este valor, mas não o transforme em link wa.me sem trocar por um número que atenda."
+  }
+}

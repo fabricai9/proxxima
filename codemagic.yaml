@@ -156,8 +156,22 @@ workflows:
           # Era isto que exigia Xcode local — e o Mac mini 2014 não roda o
           # Xcode 15+ que a Apple passou a exigir.
           keychain initialize
+
+          # A chave privada é criada AQUI, e é ela que faltava. Sem chave, o
+          # fetch-signing-files não consegue gerar nem salvar o certificado --
+          # e o log diz "Cannot save Signing Certificates without certificate
+          # private key" no meio de mensagens de sucesso, fácil de não ver.
+          #
+          # O erro só aparece dois passos depois, como "requires a provisioning
+          # profile", apontando para o lugar errado.
+          app-store-connect create-certificate \
+            --type IOS_DISTRIBUTION \
+            --save || echo "Certificado já existe, seguindo."
+
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
-            --type IOS_APP_STORE --create
+            --type IOS_APP_STORE \
+            --create
+
           keychain add-certificates
 
           # O --project é obrigatório: sem ele o use-profiles procura o projeto

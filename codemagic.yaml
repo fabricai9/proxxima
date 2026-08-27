@@ -29,6 +29,11 @@ workflows:
       app_store_connect: proxxima_appstore
 
     environment:
+      groups:
+        # Sem declarar o grupo, as variáveis cadastradas no painel não chegam
+        # ao build -- e o passo do GoogleService-Info.plist passaria batido,
+        # deixando o app sem push sem avisar.
+        - default
       vars:
         PERFIL: padrao
         # Bundle do app JÁ PUBLICADO. Diverge do applicationId do Android

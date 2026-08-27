@@ -177,7 +177,6 @@ workflows:
         submit_to_testflight: true
         submit_to_app_store: false
 
-    publishing_email: &email
       email:
         recipients:
           - raphael.lacerda.rocha@gmail.com

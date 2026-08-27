@@ -164,13 +164,17 @@ workflows:
           #
           # O erro só aparece dois passos depois, como "requires a provisioning
           # profile", apontando para o lugar errado.
-          app-store-connect create-certificate \
-            --type IOS_DISTRIBUTION \
-            --save || echo "Certificado já existe, seguindo."
-
+          # A chave privada precisa existir ANTES de pedir o certificado: é ela
+          # que assina o CSR enviado à Apple. Sem ela o log diz "Cannot create
+          # resource without certificate private key" e nada é criado.
+          #
+          # O --create do fetch-signing-files gera a chave sozinho quando ela
+          # falta, então o create-certificate separado era desnecessário -- e
+          # foi ele que falhou. O || echo mascarou a falha como "já existe".
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
-            --create
+            --create \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY
 
           keychain add-certificates
 

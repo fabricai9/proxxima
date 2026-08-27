@@ -88,6 +88,49 @@ workflows:
               > "build/$PERFIL/ios/App/App/GoogleService-Info.plist"
             echo "GoogleService-Info.plist instalado."
           fi
+          
+      - name: Capability de Push Notifications
+        script: |
+          # O `cap add ios` cria o projeto SEM a capability de push. Sem ela o
+          # iOS não emite o evento 'registration', o push_app.js nunca recebe o
+          # token, e nada chega ao servidor -- sem erro nenhum no caminho.
+          #
+          # É por isso que havia 2423 aparelhos Android registrados e zero iOS:
+          # no Android a permissão basta, no iOS a capability é obrigatória.
+          #
+          # O entitlements precisa existir E ser referenciado no projeto; criar
+          # só o arquivo não adianta.
+          APPDIR="build/$PERFIL/ios/App"
+          ENT="$APPDIR/App/App.entitlements"
+
+          cat > "$ENT" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>aps-environment</key>
+            <string>production</string>
+          </dict>
+          </plist>
+          PLIST
+
+          cd "$APPDIR"
+          # ruby + xcodeproj já vêm na imagem do Codemagic.
+          ruby -e "
+            require 'xcodeproj'
+            projeto = Xcodeproj::Project.open('App.xcodeproj')
+            alvo = projeto.targets.find { |t| t.name == 'App' }
+            alvo.build_configurations.each do |c|
+              c.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements'
+            end
+            attrs = projeto.root_object.attributes['TargetAttributes'] ||= {}
+            attrs[alvo.uuid] ||= {}
+            attrs[alvo.uuid]['SystemCapabilities'] =
+              { 'com.apple.Push' => { 'enabled' => 1 } }
+            projeto.save
+            puts 'Capability de push habilitada.'
+          "
 
       - name: Permissões no Info.plist
         script: |
@@ -171,10 +214,13 @@ workflows:
           # O --create do fetch-signing-files gera a chave sozinho quando ela
           # falta, então o create-certificate separado era desnecessário -- e
           # foi ele que falhou. O || echo mascarou a falha como "já existe".
+          # O perfil precisa ser gerado DEPOIS da capability: um perfil criado
+          # sem push não autoriza push, e o build passa sem reclamar.
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE \
             --create \
-            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --strict-match-identifier
 
           keychain add-certificates
 

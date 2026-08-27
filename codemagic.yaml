@@ -1,0 +1,225 @@
+# =============================================================================
+# codemagic.yaml — build iOS do Portal B2C
+#
+# Fica na RAIZ do repositório, ao lado de package.json.
+#
+# POR QUE O PROJETO iOS NÃO ESTÁ NO GIT
+#
+# O `npx cap add ios` só roda em macOS, e o projeto é gerado por script. Guardar
+# a pasta ios/ no repositório significaria mantê-la à mão a cada mudança de
+# perfil — e ela nasceria desatualizada na primeira alteração de cor ou URL.
+#
+# Aqui o projeto inteiro é criado do zero a cada build, a partir do JSON do
+# perfil. O que estiver em build/ é descartável, como o próprio montar.js avisa.
+#
+# CONSEQUÊNCIA: qualquer ajuste manual no Info.plist se perde. Por isso as
+# permissões vêm do versao.json e são injetadas por um passo abaixo.
+# =============================================================================
+
+workflows:
+
+  ios-proxxima:
+    name: iOS — Minha Proxxima
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      # Nome EXATO da chave cadastrada em Settings > Integrations >
+      # Developer Portal. Errar aqui falha no passo de assinatura, não aqui.
+      app_store_connect: proxxima_appstore
+
+    environment:
+      vars:
+        PERFIL: padrao
+        # Bundle do app JÁ PUBLICADO. Diverge do applicationId do Android
+        # (br.com.proxxima.portal) porque foram publicados por equipes
+        # diferentes, invertidos. Nenhum dos dois pode mudar agora.
+        BUNDLE_ID: br.com.portal.proxxima
+        XCODE_WORKSPACE: build/padrao/ios/App/App.xcworkspace
+        XCODE_SCHEME: App
+      node: 20.11.1
+      xcode: latest
+      cocoapods: default
+
+    triggering:
+      # Sem gatilho automático: build iOS consome minutos e sobe para a Apple.
+      # Disparo manual, pelo painel.
+      events: []
+
+    scripts:
+
+      - name: Dependências da raiz
+        script: npm ci || npm install
+
+      - name: Montar o perfil
+        script: |
+          # O 2º argumento é o que faz o appId sair como bundleId do iOS.
+          # Sem ele, o Capacitor usaria o applicationId do Android e a Apple
+          # recusaria o envio — o bundle não existe nesta conta.
+          node scripts/montar.js "$PERFIL" ios
+          cat "build/$PERFIL/versao.json"
+
+      - name: Dependências do build
+        script: |
+          cd "build/$PERFIL"
+          npm install
+
+      - name: Criar o projeto iOS
+        script: |
+          cd "build/$PERFIL"
+          npx cap add ios
+          npx cap sync ios
+
+      - name: GoogleService-Info.plist
+        script: |
+          # Vem de variável de ambiente em base64, não do Git: é credencial.
+          # Cadastre em Environment variables como GOOGLE_SERVICE_INFO_PLIST,
+          # marcada como Secure.
+          if [ -z "$GOOGLE_SERVICE_INFO_PLIST" ]; then
+            echo "AVISO: GOOGLE_SERVICE_INFO_PLIST ausente."
+            echo "O app compila, mas o push NÃO funciona."
+          else
+            echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode \
+              > "build/$PERFIL/ios/App/App/GoogleService-Info.plist"
+            echo "GoogleService-Info.plist instalado."
+          fi
+
+      - name: Permissões no Info.plist
+        script: |
+          # As descrições vêm do versao.json, gerado pelo perfil. O texto
+          # aparece para o cliente quando o iOS pede autorização, e a Apple
+          # rejeita descrição genérica.
+          #
+          # Sem isto, o chat do portal reprova na revisão: ele manda áudio,
+          # imagem e arquivo, e cada um exige a sua chave.
+          PLIST="build/$PERFIL/ios/App/App/Info.plist"
+          VERSAO="build/$PERFIL/versao.json"
+
+          node -e "
+            const fs = require('fs');
+            const { execFileSync } = require('child_process');
+            const v = JSON.parse(fs.readFileSync('$VERSAO', 'utf8'));
+            const p = v.permissoesIos || {};
+            for (const [chave, texto] of Object.entries(p)) {
+              try {
+                execFileSync('/usr/libexec/PlistBuddy',
+                  ['-c', 'Add :' + chave + ' string ' + texto, '$PLIST']);
+              } catch (e) {
+                execFileSync('/usr/libexec/PlistBuddy',
+                  ['-c', 'Set :' + chave + ' ' + texto, '$PLIST']);
+              }
+              console.log('  ' + chave);
+            }
+          "
+
+          # Versão e build do iOS, independentes do Android. O app publicado
+          # está em 400000; qualquer envio precisa ser MAIOR que isso.
+          IOS_VERSION=$(node -p "require('./$VERSAO').iosVersion")
+          IOS_BUILD=$(node -p "require('./$VERSAO').iosBuild")
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $IOS_VERSION" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $IOS_BUILD" "$PLIST"
+
+          echo "--- Info.plist ---"
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | head -40
+
+      - name: Ícones
+        script: |
+          # O montar.js gera ícones para Android. Para iOS, o @capacitor/assets
+          # deriva todos os tamanhos do assets-{perfil}/icon.png que já está no
+          # repositório.
+          cd "build/$PERFIL"
+          mkdir -p assets
+          cp "../../assets-$PERFIL/icon.png" assets/icon.png
+          cp "../../assets-$PERFIL/splash.png" assets/splash.png 2>/dev/null || true
+          npx @capacitor/assets generate --ios || \
+            echo "AVISO: geração de ícones falhou; o build segue com os padrões do Capacitor."
+
+      - name: Build number
+        script: |
+          # Se já houver envio com este build number, a Apple recusa. Pegar o
+          # último do TestFlight e somar 1 evita descobrir isso no fim.
+          cd "build/$PERFIL/ios/App"
+          ULTIMO=$(app-store-connect get-latest-testflight-build-number "$APP_APPLE_ID" 2>/dev/null || echo "0")
+          PROXIMO=$(($ULTIMO + 1))
+          echo "Último no TestFlight: $ULTIMO — usando: $PROXIMO"
+          agvtool new-version -all "$PROXIMO"
+
+      - name: Assinatura
+        script: |
+          # Cria ou reaproveita o provisioning profile pela chave da Apple.
+          # Era isto que exigia Xcode local — e o Mac mini 2014 não roda o
+          # Xcode 15+ que a Apple passou a exigir.
+          keychain initialize
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+
+      - name: Compilar
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Sobe para o TestFlight, NÃO para a App Store.
+        #
+        # submit_to_app_store fica falso de propósito: publicação é decisão
+        # comercial, e um yaml não deve mandar app para revisão sozinho.
+        # Depois de validar no TestFlight, promova pelo painel.
+        submit_to_testflight: true
+        submit_to_app_store: false
+
+    publishing_email: &email
+      email:
+        recipients:
+          - raphael.lacerda.rocha@gmail.com
+        notify:
+          success: true
+          failure: true
+
+
+  # ===========================================================================
+  # ZaaZ — só depois que a Proxxima estiver validada.
+  #
+  # O app iOS da ZaaZ ainda NÃO existe no App Store Connect. Antes de rodar
+  # este workflow é preciso criá-lo lá, com o bundle de perfis/zaaz.json, e
+  # registrar o app iOS no Firebase.
+  # ===========================================================================
+  ios-zaaz:
+    name: iOS — Minha ZaaZ
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+
+    integrations:
+      app_store_connect: proxxima_appstore
+
+    environment:
+      vars:
+        PERFIL: zaaz
+        BUNDLE_ID: br.com.zaaztelecom.portal
+        XCODE_WORKSPACE: build/zaaz/ios/App/App.xcworkspace
+        XCODE_SCHEME: App
+      node: 20.11.1
+      xcode: latest
+      cocoapods: default
+
+    triggering:
+      events: []
+
+    scripts:
+      - name: Aviso
+        script: |
+          echo "Antes de usar este workflow:"
+          echo "  1. Criar o app iOS no App Store Connect com $BUNDLE_ID"
+          echo "  2. Registrar o app iOS no Firebase com o mesmo bundle"
+          echo "  3. Ajustar o bloco 'ios' em perfis/zaaz.json"
+          echo "  4. Cadastrar GOOGLE_SERVICE_INFO_PLIST_ZAAZ"
+          exit 1

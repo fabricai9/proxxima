@@ -59,6 +59,16 @@ const pkg = JSON.parse(fs.readFileSync(path.join(RAIZ, 'package.json'), 'utf8'))
 const partes = String(pkg.version).split('.').map(n => parseInt(n, 10) || 0);
 const [maior, menor, correcao] = [partes[0] || 0, partes[1] || 0, partes[2] || 0];
 
+// iOS tem numeração PRÓPRIA, vinda do bloco 'ios' do perfil.
+//
+// O app da Proxxima foi publicado por outra equipe numa faixa muito acima da
+// do Android (400000). Alinhar os dois obrigaria a saltar o Android para o
+// mesmo número sem motivo -- cada loja compara só com a versão anterior DELA.
+//
+// Sem o bloco, cai na numeração do Android, que é o certo para app novo.
+const iosVersion = (cfg.ios && cfg.ios.version) || versionName;
+const iosBuild   = String((cfg.ios && cfg.ios.build) || versionCode);
+
 if (menor > 99 || correcao > 99) {
   console.error('Versão inválida: menor e correção precisam ser menores que 100.');
   console.error('O versionCode é maior*10000 + menor*100 + correção, e passar de 99 quebra a ordem.');
@@ -108,7 +118,18 @@ for (const arq of fs.readdirSync(path.join(RAIZ, 'www'))) {
 // capacitor.config.json
 // ---------------------------------------------------------------------------
 const capacitor = {
-  appId:   cfg.app.applicationId,
+  // O Capacitor usa 'appId' para as DUAS plataformas: vira applicationId no
+  // build.gradle e PRODUCT_BUNDLE_IDENTIFIER no Xcode.
+  //
+  // Aqui os dois divergem. O app Android foi publicado como
+  // br.com.proxxima.portal e o iOS como br.com.portal.proxxima -- invertidos,
+  // por equipes diferentes. Nenhum dos dois pode mudar depois de publicado.
+  //
+  // Por isso o valor depende da plataforma alvo, passada como 2º argumento:
+  //   node scripts/montar.js padrao ios
+  appId:   (process.argv[3] === 'ios' && cfg.app.bundleId)
+             ? cfg.app.bundleId
+             : cfg.app.applicationId,
   appName: cfg.app.nome,
   webDir:  'www',
 
@@ -143,6 +164,14 @@ const capacitor = {
     // diferente do resto do sistema, e o app "parece web".
     scrollEnabled: true,
     contentInset: 'never',
+
+    // O WKWebView bloqueia captura de midia por padrao, MESMO com a permissao
+    // declarada no Info.plist. Sem estas duas linhas o botao de gravar audio
+    // do chat nao faz nada no iPhone -- e nao da erro nenhum, que e pior:
+    // parece que o app travou.
+    limitsNavigationsToAppBoundDomains: false,
+    allowsInlineMediaPlayback: true,
+    mediaTypesRequiringUserActionForPlayback: 'none',
   },
 
   plugins: {
@@ -188,9 +217,28 @@ fs.writeFileSync(path.join(saida, 'versao.json'), JSON.stringify({
   empresa: cfg.empresa,
   versionName,
   versionCode,
+  iosVersion,
+  iosBuild,
   applicationId: cfg.app.applicationId,
   bundleId: cfg.app.bundleId,
   url: cfg.url,
+
+  // Permissoes do Info.plist. Ficam AQUI e nao no workflow porque o texto
+  // aparece para o cliente no momento em que o iOS pede autorizacao -- e a
+  // Apple rejeita descricao generica tipo "o app precisa da camera".
+  //
+  // O chat do portal manda texto, audio, imagem e arquivo. Falta de qualquer
+  // uma destas quatro reprova na revisao, e a resposta so chega dias depois.
+  permissoesIos: {
+    NSMicrophoneUsageDescription:
+      'Para gravar e enviar mensagens de voz no atendimento.',
+    NSCameraUsageDescription:
+      'Para tirar foto e enviar no atendimento, como a de um equipamento com problema.',
+    NSPhotoLibraryUsageDescription:
+      'Para anexar fotos e comprovantes ja salvos no seu aparelho.',
+    NSPhotoLibraryAddUsageDescription:
+      'Para salvar no seu aparelho comprovantes e boletos baixados no app.',
+  },
   geradoEm: new Date().toISOString(),
 }, null, 2));
 

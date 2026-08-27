@@ -159,7 +159,14 @@ workflows:
           app-store-connect fetch-signing-files "$BUNDLE_ID" \
             --type IOS_APP_STORE --create
           keychain add-certificates
-          xcode-project use-profiles
+
+          # O --project é obrigatório: sem ele o use-profiles procura o projeto
+          # no diretório atual, que é a raiz do repositório, e não acha nada.
+          # O perfil é criado com sucesso e nunca chega ao Xcode -- o build
+          # falha depois, com "requires a provisioning profile", e o erro
+          # aponta para o passo errado.
+          xcode-project use-profiles \
+            --project "build/$PERFIL/ios/App/App.xcodeproj"
 
       - name: Compilar
         script: |

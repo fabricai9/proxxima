@@ -253,6 +253,15 @@ workflows:
             --workspace "$XCODE_WORKSPACE" \
             --scheme "$XCODE_SCHEME"
 
+      - name: Entitlements no binário
+        script: |
+          # Lê o que REALMENTE ficou no app assinado. É a única forma de saber
+          # se o aps-environment sobreviveu à assinatura -- o log do xcodebuild
+          # não menciona entitlements nem quando dá certo, nem quando falha.
+          APP=$(find build/ios/xcarchive -name "App.app" -maxdepth 3 | head -1)
+          echo "App: $APP"
+          codesign -d --entitlements - "$APP" 2>&1 | head -30
+
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log

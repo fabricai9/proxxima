@@ -59,16 +59,6 @@ const pkg = JSON.parse(fs.readFileSync(path.join(RAIZ, 'package.json'), 'utf8'))
 const partes = String(pkg.version).split('.').map(n => parseInt(n, 10) || 0);
 const [maior, menor, correcao] = [partes[0] || 0, partes[1] || 0, partes[2] || 0];
 
-// iOS tem numeração PRÓPRIA, vinda do bloco 'ios' do perfil.
-//
-// O app da Proxxima foi publicado por outra equipe numa faixa muito acima da
-// do Android (400000). Alinhar os dois obrigaria a saltar o Android para o
-// mesmo número sem motivo -- cada loja compara só com a versão anterior DELA.
-//
-// Sem o bloco, cai na numeração do Android, que é o certo para app novo.
-const iosVersion = (cfg.ios && cfg.ios.version) || versionName;
-const iosBuild   = String((cfg.ios && cfg.ios.build) || versionCode);
-
 if (menor > 99 || correcao > 99) {
   console.error('Versão inválida: menor e correção precisam ser menores que 100.');
   console.error('O versionCode é maior*10000 + menor*100 + correção, e passar de 99 quebra a ordem.');
@@ -78,11 +68,55 @@ if (menor > 99 || correcao > 99) {
 const versionName = `${maior}.${menor}.${correcao}`;
 const versionCode = maior * 10000 + menor * 100 + correcao;
 
+// Android tem numeração PRÓPRIA por perfil, pelo mesmo motivo do iOS: os dois
+// apps foram publicados com esquemas diferentes.
+//
+//   Proxxima -> data no código (202608202)
+//   ZaaZ     -> semântico      (130)
+//
+// Um package.json não serve para os dois. E o versionCode precisa ser MAIOR
+// que o publicado: a Play recusa igual ou menor, e o erro aparece no fim do
+// envio, depois de todo o processo de build.
+const androidVersionName = (cfg.android && cfg.android.versionName) || versionName;
+const androidVersionCode = (cfg.android && cfg.android.versionCode) || versionCode;
+
+// iOS tem numeração PRÓPRIA, vinda do bloco 'ios' do perfil.
+//
+// O app da Proxxima foi publicado por outra equipe numa faixa muito acima da
+// do Android (400000). Alinhar os dois obrigaria a saltar o Android para o
+// mesmo número sem motivo -- cada loja compara só com a versão anterior DELA.
+//
+// Precisa vir DEPOIS de versionName/versionCode: const não é içado, e a
+// reserva do || quebrava com "Cannot access before initialization" em perfil
+// sem bloco 'ios'. Passou despercebido no padrão, onde o bloco existe e o ||
+// nem chega a avaliar o outro lado.
+const iosVersion = (cfg.ios && cfg.ios.version) || versionName;
+const iosBuild   = String((cfg.ios && cfg.ios.build) || versionCode);
+
 // ---------------------------------------------------------------------------
 // Saída
 // ---------------------------------------------------------------------------
 const saida = path.join(RAIZ, 'build', perfil);
-fs.rmSync(saida, { recursive: true, force: true });
+
+// O projeto nativo NÃO é apagado.
+//
+// A versão anterior removia build/{perfil} inteira, e o comentário no topo
+// avisava que o conteúdo era descartável. Na prática cada execução levava
+// junto o android/, os ícones gerados e o google-services.json -- e refazer
+// isso tomava a maior parte do tempo de cada publicação.
+//
+// android/ e ios/ são criados pelo Capacitor e mantidos à mão (permissões,
+// orientação, chaves). O que este script gera -- www, config, versão -- é
+// sobrescrito de qualquer forma.
+const preservar = ['android', 'ios', 'node_modules'];
+
+if (fs.existsSync(saida)) {
+  for (const item of fs.readdirSync(saida)) {
+    if (preservar.includes(item)) { continue; }
+    fs.rmSync(path.join(saida, item), { recursive: true, force: true });
+  }
+}
+
 fs.mkdirSync(path.join(saida, 'www'), { recursive: true });
 
 /** Copia substituindo os marcadores {{CHAVE}}. */
@@ -112,6 +146,28 @@ for (const arq of fs.readdirSync(path.join(RAIZ, 'www'))) {
     path.join(saida, 'www', arq),
     substituicoes
   );
+}
+
+// ---------------------------------------------------------------------------
+// assets/ — origem dos ícones e da splash
+//
+// O @capacitor/assets lê daqui para gerar todas as densidades. Sem esta cópia
+// era preciso criar a pasta à mão a cada build, e esquecer disso faz o app sair
+// com o robô verde do Capacitor no lugar da logo.
+//
+// O generate NÃO roda aqui: ele depende de android/ já existir, e este script
+// roda antes do `cap add android`.
+// ---------------------------------------------------------------------------
+const origemAssets = path.join(RAIZ, 'assets-' + perfil);
+
+if (fs.existsSync(origemAssets)) {
+  const destAssets = path.join(saida, 'assets');
+  fs.mkdirSync(destAssets, { recursive: true });
+  for (const arq of fs.readdirSync(origemAssets)) {
+    fs.copyFileSync(path.join(origemAssets, arq), path.join(destAssets, arq));
+  }
+} else {
+  console.warn('  AVISO  assets-' + perfil + '/ não existe — ícones sairão no padrão do Capacitor.');
 }
 
 // ---------------------------------------------------------------------------
@@ -200,11 +256,68 @@ fs.writeFileSync(
 );
 
 // ---------------------------------------------------------------------------
+// travar-orientacao.js — roda DEPOIS do `npx cap add android`
+//
+// O AndroidManifest.xml só existe depois do `cap add android`, e este script
+// roda antes — além de apagar build/{perfil} inteira. Por isso a trava não
+// pode ser escrita aqui: ela vira um script auxiliar, gerado junto.
+//
+// Não usa plugin. `android:screenOrientation="portrait"` é atributo nativo da
+// activity; um plugin de orientação traria pacote novo, pod novo no iOS e mais
+// uma peça para dar errado.
+//
+// O iOS é travado pelo codemagic.yaml, no Info.plist.
+// ---------------------------------------------------------------------------
+const travador = `#!/usr/bin/env node
+/**
+ * Trava o app em retrato. Rode DEPOIS de \`npx cap add android\`:
+ *
+ *   node travar-orientacao.js
+ *
+ * Gerado por scripts/montar.js. Não edite aqui — edite lá.
+ */
+const fs = require('fs');
+const path = require('path');
+
+const manifesto = path.join(__dirname, 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
+
+if (!fs.existsSync(manifesto)) {
+  console.error('AndroidManifest.xml não encontrado.');
+  console.error('Rode \`npx cap add android\` antes.');
+  process.exit(1);
+}
+
+let xml = fs.readFileSync(manifesto, 'utf8');
+
+if (xml.includes('android:screenOrientation')) {
+  console.log('Orientação já estava travada.');
+  process.exit(0);
+}
+
+// Entra na activity principal, junto do configChanges que o Capacitor já põe.
+const antes = xml;
+xml = xml.replace(
+  /(<activity\b[^>]*android:name="\.MainActivity")/,
+  '$1\n            android:screenOrientation="portrait"'
+);
+
+if (xml === antes) {
+  console.error('Não achei a MainActivity no manifesto. Nada foi alterado.');
+  process.exit(1);
+}
+
+fs.writeFileSync(manifesto, xml);
+console.log('Orientação travada em retrato.');
+`;
+
+fs.writeFileSync(path.join(saida, 'travar-orientacao.js'), travador);
+
+// ---------------------------------------------------------------------------
 // package.json do build
 // ---------------------------------------------------------------------------
 fs.writeFileSync(path.join(saida, 'package.json'), JSON.stringify({
   name: `portal-${perfil}`,
-  version: versionName,
+  version: androidVersionName,
   private: true,
   dependencies: pkg.dependencies,
 }, null, 2));
@@ -215,8 +328,10 @@ fs.writeFileSync(path.join(saida, 'package.json'), JSON.stringify({
 fs.writeFileSync(path.join(saida, 'versao.json'), JSON.stringify({
   perfil,
   empresa: cfg.empresa,
-  versionName,
-  versionCode,
+  // Os nomes ficam 'versionName'/'versionCode' porque e assim que o Gradle e
+  // os scripts de build ja os leem. O valor e que passou a vir do perfil.
+  versionName: androidVersionName,
+  versionCode: androidVersionCode,
   iosVersion,
   iosBuild,
   applicationId: cfg.app.applicationId,
@@ -245,11 +360,20 @@ fs.writeFileSync(path.join(saida, 'versao.json'), JSON.stringify({
 console.log(`
   Perfil       ${cfg.empresa} (${perfil})
   App          ${cfg.app.nome}
-  Id           ${cfg.app.applicationId}
   URL          ${cfg.url}
-  Versão       ${versionName}  (código ${versionCode})
+  Id Android   ${cfg.app.applicationId}
+  Id iOS       ${cfg.app.bundleId || '(mesmo do Android)'}
+  Android      ${androidVersionName}  (código ${androidVersionCode})
+  iOS          ${iosVersion}  (build ${iosBuild})
   Saída        build/${perfil}/
 
-  Próximo passo:
-    cd build/${perfil} && npm install && npx cap add android
+  Próximo passo (primeira vez):
+    cd build/${perfil}
+    npm install
+    npx cap add android
+    node travar-orientacao.js
+    npx @capacitor/assets generate --android
+
+  Nas próximas: android/ e ios/ são PRESERVADOS. Só o www, o config e a
+  versão são regerados -- não precisa refazer ícones nem permissões.
 `);

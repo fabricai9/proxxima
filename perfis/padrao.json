@@ -5,7 +5,7 @@
   "app": {
     "nome": "Minha Proxxima",
     "nomeCurto": "Proxxima",
-    "applicationId": "br.com.proxxima.portal",
+    "applicationId": "br.com.portal.proxxima",
     "bundleId": "br.com.portal.proxxima",
     "userAgent": "TrilhaApp/Proxxima"
   },
@@ -13,6 +13,11 @@
   "ios": {
     "version": "400001",
     "build": "1"
+  },
+
+  "android": {
+    "versionName": "202608.205",
+    "versionCode": 202608205
   },
 
   "url": "https://grupozaaz.trilha.app/portal",
@@ -33,6 +38,7 @@
     "url": "Sem ?p= porque este é o perfil PADRÃO — o portal resolve nele quando não há parâmetro. Quando o domínio próprio rotear, aqui vira https://portal.proxxima.net e o parâmetro desaparece de vez.",
     "applicationId": "PRECISA ser o mesmo do app já publicado, se a ideia for substituí-lo. Identificador diferente vira app novo na loja, e os usuários não recebem como atualização.",
     "suporte": "Exibido na tela de sem-internet, que é o único momento em que o app não consegue ler a configuração do portal. Espelha portal_config id=1 (suporte_telefone / suporte_whatsapp). Divergir daqui só aparece quando o cliente está offline — ninguém reclama por dentro do app, então a checagem é no build (montar.js).",
-    "whatsapp": "É o próprio 0800 com prefixo 55. 0800 não recebe WhatsApp. Hoje o offline.html não usa este valor, mas não o transforme em link wa.me sem trocar por um número que atenda."
+    "whatsapp": "É o próprio 0800 com prefixo 55. 0800 não recebe WhatsApp. Hoje o offline.html não usa este valor, mas não o transforme em link wa.me sem trocar por um número que atenda.",
+    "android": "Numeração PRÓPRIA de cada app, porque os dois foram publicados com esquemas diferentes: a Proxxima usa data (202608202) e a ZaaZ usa semântico (130). O package.json não serve para os dois. O versionCode precisa ser MAIOR que o publicado — a Play recusa igual ou menor, e o erro só aparece no fim do envio."
   }
 }

@@ -5,9 +5,14 @@
   "app": {
     "nome": "Minha ZaaZ",
     "nomeCurto": "ZaaZ",
-    "applicationId": "br.com.zaaztelecom.portal",
+    "applicationId": "br.com.minhazaaz.app",
     "bundleId": "br.com.zaaztelecom.portal",
     "userAgent": "TrilhaApp/ZaaZ"
+  },
+
+  "android": {
+    "versionName": "1.3.1",
+    "versionCode": 131
   },
 
   "url": "https://grupozaaz.trilha.app/portal?p=zaaz",
@@ -28,6 +33,7 @@
     "url": "O ?p=zaaz é TEMPORÁRIO. Quando portal.zaaztelecom.com.br rotear até o tenant, troque por ele e o parâmetro sai — inclusive do portal.php, onde hoje a api() precisa repassá-lo em toda chamada.",
     "cores": "Devem bater com o que está no portal_config do perfil 2. Divergência aparece na abertura: a splash pisca numa cor e o portal carrega noutra.",
     "suporte": "Espelha portal_config id=2 (suporte_telefone / suporte_whatsapp). Exibido na tela de sem-internet, que é o único momento em que o app não consegue ler a configuração do portal.",
-    "whatsapp": "É o próprio 0800 com prefixo 55. 0800 não recebe WhatsApp. Hoje o offline.html não usa este valor, mas não o transforme em link wa.me sem trocar por um número que atenda."
+    "whatsapp": "É o próprio 0800 com prefixo 55. 0800 não recebe WhatsApp. Hoje o offline.html não usa este valor, mas não o transforme em link wa.me sem trocar por um número que atenda.",
+    "android": "Numeração PRÓPRIA de cada app, porque os dois foram publicados com esquemas diferentes: a Proxxima usa data (202608202) e a ZaaZ usa semântico (130). O package.json não serve para os dois. O versionCode precisa ser MAIOR que o publicado — a Play recusa igual ou menor, e o erro só aparece no fim do envio."
   }
 }

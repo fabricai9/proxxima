@@ -131,13 +131,6 @@ workflows:
           #
           # A versão anterior sobrescrevia didRegisterForRemoteNotifications e
           # derrubava o app na abertura -- o build 7, sem ela, abria normal.
-          PLIST_APP="$APPDIR/App/Info.plist"
-          /usr/libexec/PlistBuddy -c \
-            "Add :FirebaseAppDelegateProxyEnabled bool true" "$PLIST_APP" 2>/dev/null || \
-          /usr/libexec/PlistBuddy -c \
-            "Set :FirebaseAppDelegateProxyEnabled true" "$PLIST_APP"
-          echo "Swizzling do Firebase habilitado."
-
           echo "--- Podfile ---"
           grep -n "pod " "$APPDIR/Podfile"
           echo "--- AppDelegate ---"

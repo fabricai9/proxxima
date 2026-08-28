@@ -117,6 +117,42 @@ workflows:
             echo "FirebaseApp.configure() adicionado."
           fi
 
+          # 3. A ponte APNs -> Firebase.
+          #
+          # O plugin registra no APNs e o iOS devolve o token APNs ao
+          # AppDelegate. Mas o Firebase não fica sabendo: ele precisa receber
+          # esse token para gerar o token FCM, e ninguém faz a passagem.
+          #
+          # Sem esta linha o Firebase inicializa, o APNs responde, e o plugin
+          # espera para sempre um token FCM que nunca é gerado -- que é
+          # exatamente o sintoma: register() chamado e nenhum evento.
+          if ! grep -q "Messaging.messaging().apnsToken" "$DELEGATE"; then
+            sed -i '' 's|^import FirebaseCore|import FirebaseCore\nimport FirebaseMessaging|' "$DELEGATE"
+
+            python3 - "$DELEGATE" <<'PY'
+          import sys, re
+          caminho = sys.argv[1]
+          fonte = open(caminho, encoding='utf-8').read()
+
+          metodo = '''
+              func application(_ application: UIApplication,
+                               didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+                  // Entrega o token APNs ao Firebase. Sem isto o FCM nunca gera
+                  // o token que o plugin espera.
+                  Messaging.messaging().apnsToken = deviceToken
+                  NotificationCenter.default.post(
+                      name: .capacitorDidRegisterForRemoteNotifications,
+                      object: deviceToken)
+              }
+          '''
+
+          # Entra logo depois da abertura da classe.
+          fonte = re.sub(r'(var window: UIWindow\?\n)', r'\1' + metodo, fonte, count=1)
+          open(caminho, 'w', encoding='utf-8').write(fonte)
+          print('Ponte APNs -> Firebase adicionada.')
+          PY
+          fi
+
           echo "--- Podfile ---"
           grep -n "pod " "$APPDIR/Podfile"
           echo "--- AppDelegate ---"

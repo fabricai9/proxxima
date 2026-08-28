@@ -75,6 +75,16 @@ workflows:
           npx cap add ios
           npx cap sync ios
 
+          # Empacota o projeto para download. A partir daqui ele passa a viver
+          # no Git, gerado UMA vez -- e o workflow só compila.
+          #
+          # Recriar a cada build parecia limpo, mas transformou cada ajuste do
+          # Firebase num ciclo de build, upload, processamento da Apple e
+          # instalação. Cada erro custou uma versão no TestFlight.
+          cd ios
+          tar -czf "$CM_BUILD_DIR/ios-projeto.tar.gz" App
+          echo "Projeto empacotado para download."
+
       - name: GoogleService-Info.plist
         script: |
           # Vem de variável de ambiente em base64, não do Git: é credencial.
@@ -276,6 +286,7 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
+      - ios-projeto.tar.gz
 
     publishing:
       app_store_connect:

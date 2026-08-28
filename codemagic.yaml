@@ -232,6 +232,21 @@ workflows:
           xcode-project use-profiles \
             --project "build/$PERFIL/ios/App/App.xcodeproj"
 
+      - name: Conferir entitlements
+        script: |
+          # O APNs aceita register() e não responde nada quando o binário não
+          # tem aps-environment. Nem token, nem erro -- é o que o diagnóstico
+          # no aparelho mostrou.
+          #
+          # O entitlements é escrito antes da assinatura, mas o use-profiles
+          # pode sobrescrever CODE_SIGN_ENTITLEMENTS com o do perfil.
+          echo "--- App.entitlements ---"
+          cat "build/$PERFIL/ios/App/App/App.entitlements" || echo "AUSENTE"
+
+          echo "--- CODE_SIGN_ENTITLEMENTS no projeto ---"
+          grep -n "CODE_SIGN_ENTITLEMENTS" \
+            "build/$PERFIL/ios/App/App.xcodeproj/project.pbxproj" || echo "NAO REFERENCIADO"
+
       - name: Compilar
         script: |
           xcode-project build-ipa \

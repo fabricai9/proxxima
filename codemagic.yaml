@@ -88,6 +88,43 @@ workflows:
               > "build/$PERFIL/ios/App/App/GoogleService-Info.plist"
             echo "GoogleService-Info.plist instalado."
           fi
+
+      - name: SDK do Firebase
+        script: |
+          # O @capacitor/push-notifications NÃO fala com o FCM sozinho no iOS.
+          # Ele registra no APNs e espera o Firebase devolver o token FCM -- e
+          # sem o SDK nativo esse retorno nunca vem. Nem token, nem erro.
+          #
+          # No Android o Firebase entra pelo Gradle junto do google-services.json,
+          # por isso lá funciona sem nada extra. No iOS é manual, e o
+          # `cap add ios` não faz.
+          #
+          # Dois arquivos: o pod no Podfile, e o FirebaseApp.configure() no
+          # AppDelegate. Faltando um dos dois, o push continua mudo.
+          APPDIR="build/$PERFIL/ios/App"
+
+          # 1. O pod
+          if ! grep -q "Firebase/Messaging" "$APPDIR/Podfile"; then
+            sed -i '' "s|target 'App' do|target 'App' do\n  pod 'Firebase/Messaging'|" "$APPDIR/Podfile"
+            echo "Pod adicionado ao Podfile."
+          fi
+
+          # 2. A inicialização
+          DELEGATE="$APPDIR/App/AppDelegate.swift"
+          if ! grep -q "FirebaseApp.configure" "$DELEGATE"; then
+            sed -i '' 's|^import UIKit|import UIKit\nimport FirebaseCore|' "$DELEGATE"
+            sed -i '' 's|didFinishLaunchingWithOptions launchOptions: \[UIApplication.LaunchOptionsKey: Any\]?) -> Bool {|didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {\n        FirebaseApp.configure()|' "$DELEGATE"
+            echo "FirebaseApp.configure() adicionado."
+          fi
+
+          echo "--- Podfile ---"
+          grep -n "pod " "$APPDIR/Podfile"
+          echo "--- AppDelegate ---"
+          head -20 "$DELEGATE"
+
+          # 3. Reinstalar os pods com o Firebase
+          cd "$APPDIR"
+          pod install
           
       - name: Capability de Push Notifications
         script: |

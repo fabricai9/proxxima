@@ -285,6 +285,35 @@ workflows:
           /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $IOS_VERSION" "$PLIST"
           /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $IOS_BUILD" "$PLIST"
 
+          # Trava em retrato. O template do Capacitor traz as quatro
+          # orientações; apagar o array e recriar só com portrait é mais seguro
+          # que remover item por item, porque o índice muda a cada remoção.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
+          # iPad usa chave própria. Mesmo sem publicar para iPad, deixá-la com
+          # as quatro faria o app rodar deitado em modo compatível.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
+          # Trava em retrato. O template do Capacitor traz as quatro
+          # orientações; apagar o array e recriar só com portrait é mais seguro
+          # que remover item por item, porque o índice muda a cada remoção.
+          #
+          # Sem plugin: é o mesmo caminho do Android, atributo nativo da
+          # plataforma. Plugin traria pod novo e mais uma peça para dar errado.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
+          # iPad usa uma chave própria. Mesmo sem publicar para iPad, deixá-la
+          # com as quatro faria o app rodar deitado no iPad em modo compatível.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
           echo "--- Info.plist ---"
           /usr/libexec/PlistBuddy -c "Print" "$PLIST" | head -40
 

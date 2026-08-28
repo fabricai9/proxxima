@@ -86,7 +86,36 @@ workflows:
           else
             echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode \
               > "build/$PERFIL/ios/App/App/GoogleService-Info.plist"
-            echo "GoogleService-Info.plist instalado."
+            echo "GoogleService-Info.plist gravado na pasta."
+
+            # Gravar na pasta NÃO basta. O `cap add ios` já criou o projeto, e
+            # arquivo colocado depois não entra no project.pbxproj -- logo, não
+            # vai para o bundle do app.
+            #
+            # O FirebaseApp.configure() não acha o arquivo e DERRUBA o app na
+            # abertura, sem log. É o crash que apareceu do build 8 em diante: o
+            # 7, sem Firebase, abria normal.
+            cd "build/$PERFIL/ios/App"
+            ruby -e "
+              require 'xcodeproj'
+              projeto = Xcodeproj::Project.open('App.xcodeproj')
+              alvo    = projeto.targets.find { |t| t.name == 'App' }
+              grupo   = projeto.main_group.find_subpath('App', true)
+
+              ja = alvo.resources_build_phase.files.any? { |f|
+                f.file_ref && f.file_ref.path.to_s.include?('GoogleService-Info')
+              }
+
+              unless ja
+                ref = grupo.new_reference('GoogleService-Info.plist')
+                alvo.add_resources([ref])
+                projeto.save
+                puts 'plist incluido no target do Xcode.'
+              else
+                puts 'plist ja estava no target.'
+              end
+            "
+            cd -
           fi
 
       - name: SDK do Firebase

@@ -96,8 +96,115 @@ workflows:
           else
             echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode \
               > "build/$PERFIL/ios/App/App/GoogleService-Info.plist"
-            echo "GoogleService-Info.plist instalado."
+            echo "GoogleService-Info.plist gravado na pasta."
+
+            # Gravar na pasta NÃO basta. O `cap add ios` já criou o projeto, e
+            # arquivo colocado depois não entra no project.pbxproj -- logo, não
+            # vai para o bundle do app.
+            #
+            # O FirebaseApp.configure() não acha o arquivo e DERRUBA o app na
+            # abertura, sem log.
+            cd "build/$PERFIL/ios/App"
+            ruby -e "
+              require 'xcodeproj'
+              projeto = Xcodeproj::Project.open('App.xcodeproj')
+              alvo    = projeto.targets.find { |t| t.name == 'App' }
+              grupo   = projeto.main_group.find_subpath('App', true)
+
+              ja = alvo.resources_build_phase.files.any? { |f|
+                f.file_ref && f.file_ref.path.to_s.include?('GoogleService-Info')
+              }
+
+              unless ja
+                ref = grupo.new_reference('GoogleService-Info.plist')
+                alvo.add_resources([ref])
+                projeto.save
+                puts 'plist incluido no target do Xcode.'
+              else
+                puts 'plist ja estava no target.'
+              end
+            "
+            cd -
           fi
+
+      - name: Firebase e AppDelegate
+        script: |
+          # A CAUSA do push iOS nunca ter funcionado.
+          #
+          # O AppDelegate.swift gerado pelo `cap add ios` NÃO implementa
+          # didRegisterForRemoteNotificationsWithDeviceToken. A documentação do
+          # @capacitor/push-notifications manda adicioná-lo à mão -- sem ele o
+          # plugin nunca recebe o token, e não há erro: permissão concedida,
+          # register() chamado, nenhum evento.
+          #
+          # O Firebase entra porque o backend envia por FCM. O token APNs é
+          # convertido em token FCM aqui, e só então postado ao Capacitor.
+          APPDIR="build/$PERFIL/ios/App"
+
+          # 1. O pod
+          if ! grep -q "Firebase/Messaging" "$APPDIR/Podfile"; then
+            sed -i '' "s|^  # Add your Pods here|  pod 'Firebase/Messaging'|" "$APPDIR/Podfile"
+          fi
+
+          # 2. O AppDelegate, reescrito por Python.
+          #    textwrap.dedent resolve a indentação do heredoc dentro do YAML,
+          #    que da última vez comeu as primeiras linhas de um plist.
+          python3 <<'PY'
+          import textwrap, re
+          caminho = "build/PERFILAQUI/ios/App/App/AppDelegate.swift".replace("PERFILAQUI", __import__("os").environ["PERFIL"])
+          fonte = open(caminho, encoding="utf-8").read()
+
+          if "capacitorDidRegisterForRemoteNotifications" not in fonte:
+              fonte = fonte.replace(
+                  "import Capacitor",
+                  "import Capacitor\nimport FirebaseCore\nimport FirebaseMessaging", 1)
+
+              fonte = fonte.replace(
+                  "        // Override point for customization after application launch.\n        return true",
+                  "        FirebaseApp.configure()\n        return true", 1)
+
+              metodos = textwrap.dedent('''
+                  func application(_ application: UIApplication,
+                                   didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+                      // Converte o token APNs em token FCM antes de entregar ao
+                      // Capacitor: o backend envia por FCM, não por APNs direto.
+                      Messaging.messaging().apnsToken = deviceToken
+                      Messaging.messaging().token { token, erro in
+                          if let erro = erro {
+                              NotificationCenter.default.post(
+                                  name: .capacitorDidFailToRegisterForRemoteNotifications, object: erro)
+                          } else if let token = token {
+                              NotificationCenter.default.post(
+                                  name: .capacitorDidRegisterForRemoteNotifications, object: token)
+                          }
+                      }
+                  }
+
+                  func application(_ application: UIApplication,
+                                   didFailToRegisterForRemoteNotificationsWithError error: Error) {
+                      NotificationCenter.default.post(
+                          name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+                  }
+
+              ''')
+              metodos = textwrap.indent(metodos, "    ")
+
+              # Entra logo depois de didFinishLaunchingWithOptions.
+              fonte = fonte.replace(
+                  "        FirebaseApp.configure()\n        return true\n    }\n",
+                  "        FirebaseApp.configure()\n        return true\n    }\n" + metodos, 1)
+
+              open(caminho, "w", encoding="utf-8").write(fonte)
+              print("AppDelegate ajustado.")
+          else:
+              print("AppDelegate ja estava ajustado.")
+          PY
+
+          echo "--- AppDelegate ---"
+          head -45 "$APPDIR/App/AppDelegate.swift"
+
+          cd "$APPDIR"
+          pod install
           
       - name: Capability de Push Notifications
         script: |

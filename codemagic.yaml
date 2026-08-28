@@ -258,9 +258,20 @@ workflows:
           # Lê o que REALMENTE ficou no app assinado. É a única forma de saber
           # se o aps-environment sobreviveu à assinatura -- o log do xcodebuild
           # não menciona entitlements nem quando dá certo, nem quando falha.
-          APP=$(find build/ios/xcarchive -name "App.app" -maxdepth 3 | head -1)
-          echo "App: $APP"
-          codesign -d --entitlements - "$APP" 2>&1 | head -30
+          # Sem -maxdepth: o .xcarchive tem sufixo aleatório no nome e o App.app
+          # fica em Products/Applications, mais fundo que 3 níveis.
+          APP=$(find /Users/builder/clone/build/ios/xcarchive -name "App.app" -type d 2>/dev/null | head -1)
+          [ -z "$APP" ] && APP=$(find / -name "App.app" -type d -path "*xcarchive*" 2>/dev/null | head -1)
+
+          echo "App encontrado: ${APP:-NENHUM}"
+
+          if [ -n "$APP" ]; then
+            echo "--- entitlements do binário assinado ---"
+            codesign -d --entitlements - "$APP" 2>&1 | head -30
+          else
+            echo "Nenhum App.app localizado. Conteúdo de build/ios:"
+            ls -R /Users/builder/clone/build/ios 2>/dev/null | head -30
+          fi
 
     artifacts:
       - build/ios/ipa/*.ipa

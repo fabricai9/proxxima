@@ -306,6 +306,22 @@ workflows:
           /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:2 string UIInterfaceOrientationLandscapeLeft" "$PLIST"
           /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:3 string UIInterfaceOrientationLandscapeRight" "$PLIST"
 
+          # Trava em retrato. O template do Capacitor traz as quatro
+          # orientações; apagar o array e recriar só com portrait é mais seguro
+          # que remover item por item, porque o índice muda a cada remoção.
+          #
+          # Sem plugin: é o mesmo caminho do Android, atributo nativo da
+          # plataforma. Plugin traria pod novo e mais uma peça para dar errado.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
+          # iPad usa uma chave própria. Mesmo sem publicar para iPad, deixá-la
+          # com as quatro faria o app rodar deitado no iPad em modo compatível.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
           echo "--- Info.plist ---"
           /usr/libexec/PlistBuddy -c "Print" "$PLIST" | head -40
 
@@ -436,11 +452,8 @@ workflows:
 
 
   # ===========================================================================
-  # ZaaZ — só depois que a Proxxima estiver validada.
-  #
-  # O app iOS da ZaaZ ainda NÃO existe no App Store Connect. Antes de rodar
-  # este workflow é preciso criá-lo lá, com o bundle de perfis/zaaz.json, e
-  # registrar o app iOS no Firebase.
+  # ZaaZ — equipe Apple DIFERENTE da Proxxima. Mesmos passos, outro perfil,
+  # outra chave de API (zaaz_appstore) e outro grupo de variáveis (zaaz).
   # ===========================================================================
   ios-zaaz:
     name: iOS — Minha ZaaZ
@@ -448,12 +461,25 @@ workflows:
     instance_type: mac_mini_m2
 
     integrations:
-      app_store_connect: proxxima_appstore
+      # Nome EXATO da chave cadastrada em Settings > Integrations >
+      # Developer Portal. Errar aqui falha no passo de assinatura, não aqui.
+      # Chave de API da equipe Apple da ZaaZ -- é OUTRA equipe, a chave da
+      # Proxxima não enxerga este app.
+      app_store_connect: zaaz_appstore
 
     environment:
+      groups:
+        # Sem declarar o grupo, as variáveis cadastradas no painel não chegam
+        # ao build -- e o passo do GoogleService-Info.plist passaria batido,
+        # deixando o app sem push sem avisar.
+        # Grupo PRÓPRIO: mesmos nomes de variável do default, valores da ZaaZ
+        # (plist, Apple ID, chave do certificado). Não importar o default.
+        - zaaz
       vars:
         PERFIL: zaaz
-        BUNDLE_ID: br.com.zaaztelecom.portal
+        # Bundle do app JÁ PUBLICADO na App Store (ID Apple 6557074695).
+        # Diverge do Android (br.com.minhazaaz.app). Não pode mudar.
+        BUNDLE_ID: br.com.zaaz.app
         XCODE_WORKSPACE: build/zaaz/ios/App/App.xcworkspace
         XCODE_SCHEME: App
       node: 20.11.1
@@ -461,14 +487,405 @@ workflows:
       cocoapods: default
 
     triggering:
+      # Sem gatilho automático: build iOS consome minutos e sobe para a Apple.
+      # Disparo manual, pelo painel.
       events: []
 
     scripts:
-      - name: Aviso
+
+      - name: Dependências da raiz
+        script: npm ci || npm install
+
+      - name: Montar o perfil
         script: |
-          echo "Antes de usar este workflow:"
-          echo "  1. Criar o app iOS no App Store Connect com $BUNDLE_ID"
-          echo "  2. Registrar o app iOS no Firebase com o mesmo bundle"
-          echo "  3. Ajustar o bloco 'ios' em perfis/zaaz.json"
-          echo "  4. Cadastrar GOOGLE_SERVICE_INFO_PLIST_ZAAZ"
-          exit 1
+          # O 2º argumento é o que faz o appId sair como bundleId do iOS.
+          # Sem ele, o Capacitor usaria o applicationId do Android e a Apple
+          # recusaria o envio — o bundle não existe nesta conta.
+          node scripts/montar.js "$PERFIL" ios
+          cat "build/$PERFIL/versao.json"
+
+      - name: Dependências do build
+        script: |
+          cd "build/$PERFIL"
+          npm install
+
+      - name: Criar o projeto iOS
+        script: |
+          cd "build/$PERFIL"
+          npx cap add ios
+          npx cap sync ios
+
+          # Empacota o projeto para download. A partir daqui ele passa a viver
+          # no Git, gerado UMA vez -- e o workflow só compila.
+          #
+          # Recriar a cada build parecia limpo, mas transformou cada ajuste do
+          # Firebase num ciclo de build, upload, processamento da Apple e
+          # instalação. Cada erro custou uma versão no TestFlight.
+          cd ios
+          tar -czf "$CM_BUILD_DIR/ios-projeto.tar.gz" App
+          echo "Projeto empacotado para download."
+
+      - name: GoogleService-Info.plist
+        script: |
+          # Vem de variável de ambiente em base64, não do Git: é credencial.
+          # Cadastre em Environment variables como GOOGLE_SERVICE_INFO_PLIST,
+          # marcada como Secure.
+          if [ -z "$GOOGLE_SERVICE_INFO_PLIST" ]; then
+            echo "AVISO: GOOGLE_SERVICE_INFO_PLIST ausente."
+            echo "O app compila, mas o push NÃO funciona."
+          else
+            echo "$GOOGLE_SERVICE_INFO_PLIST" | base64 --decode \
+              > "build/$PERFIL/ios/App/App/GoogleService-Info.plist"
+            echo "GoogleService-Info.plist gravado na pasta."
+
+            # Gravar na pasta NÃO basta. O `cap add ios` já criou o projeto, e
+            # arquivo colocado depois não entra no project.pbxproj -- logo, não
+            # vai para o bundle do app.
+            #
+            # O FirebaseApp.configure() não acha o arquivo e DERRUBA o app na
+            # abertura, sem log.
+            cd "build/$PERFIL/ios/App"
+            ruby -e "
+              require 'xcodeproj'
+              projeto = Xcodeproj::Project.open('App.xcodeproj')
+              alvo    = projeto.targets.find { |t| t.name == 'App' }
+              grupo   = projeto.main_group.find_subpath('App', true)
+
+              ja = alvo.resources_build_phase.files.any? { |f|
+                f.file_ref && f.file_ref.path.to_s.include?('GoogleService-Info')
+              }
+
+              unless ja
+                ref = grupo.new_reference('GoogleService-Info.plist')
+                alvo.add_resources([ref])
+                projeto.save
+                puts 'plist incluido no target do Xcode.'
+              else
+                puts 'plist ja estava no target.'
+              end
+            "
+            cd -
+          fi
+
+      - name: Firebase e AppDelegate
+        script: |
+          # A CAUSA do push iOS nunca ter funcionado.
+          #
+          # O AppDelegate.swift gerado pelo `cap add ios` NÃO implementa
+          # didRegisterForRemoteNotificationsWithDeviceToken. A documentação do
+          # @capacitor/push-notifications manda adicioná-lo à mão -- sem ele o
+          # plugin nunca recebe o token, e não há erro: permissão concedida,
+          # register() chamado, nenhum evento.
+          #
+          # O Firebase entra porque o backend envia por FCM. O token APNs é
+          # convertido em token FCM aqui, e só então postado ao Capacitor.
+          APPDIR="build/$PERFIL/ios/App"
+
+          # 1. O pod
+          if ! grep -q "Firebase/Messaging" "$APPDIR/Podfile"; then
+            sed -i '' "s|^  # Add your Pods here|  pod 'Firebase/Messaging'|" "$APPDIR/Podfile"
+          fi
+
+          # 2. O AppDelegate, reescrito por Python.
+          #    textwrap.dedent resolve a indentação do heredoc dentro do YAML,
+          #    que da última vez comeu as primeiras linhas de um plist.
+          python3 <<'PY'
+          import textwrap, re
+          caminho = "build/PERFILAQUI/ios/App/App/AppDelegate.swift".replace("PERFILAQUI", __import__("os").environ["PERFIL"])
+          fonte = open(caminho, encoding="utf-8").read()
+
+          if "capacitorDidRegisterForRemoteNotifications" not in fonte:
+              fonte = fonte.replace(
+                  "import Capacitor",
+                  "import Capacitor\nimport FirebaseCore\nimport FirebaseMessaging", 1)
+
+              fonte = fonte.replace(
+                  "        // Override point for customization after application launch.\n        return true",
+                  "        FirebaseApp.configure()\n        return true", 1)
+
+              metodos = textwrap.dedent('''
+                  func application(_ application: UIApplication,
+                                   didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+                      // Converte o token APNs em token FCM antes de entregar ao
+                      // Capacitor: o backend envia por FCM, não por APNs direto.
+                      Messaging.messaging().apnsToken = deviceToken
+                      Messaging.messaging().token { token, erro in
+                          if let erro = erro {
+                              NotificationCenter.default.post(
+                                  name: .capacitorDidFailToRegisterForRemoteNotifications, object: erro)
+                          } else if let token = token {
+                              NotificationCenter.default.post(
+                                  name: .capacitorDidRegisterForRemoteNotifications, object: token)
+                          }
+                      }
+                  }
+
+                  func application(_ application: UIApplication,
+                                   didFailToRegisterForRemoteNotificationsWithError error: Error) {
+                      NotificationCenter.default.post(
+                          name: .capacitorDidFailToRegisterForRemoteNotifications, object: error)
+                  }
+
+              ''')
+              metodos = textwrap.indent(metodos, "    ")
+
+              # Entra logo depois de didFinishLaunchingWithOptions.
+              fonte = fonte.replace(
+                  "        FirebaseApp.configure()\n        return true\n    }\n",
+                  "        FirebaseApp.configure()\n        return true\n    }\n" + metodos, 1)
+
+              open(caminho, "w", encoding="utf-8").write(fonte)
+              print("AppDelegate ajustado.")
+          else:
+              print("AppDelegate ja estava ajustado.")
+          PY
+
+          echo "--- AppDelegate ---"
+          head -45 "$APPDIR/App/AppDelegate.swift"
+
+          cd "$APPDIR"
+          pod install
+          
+      - name: Capability de Push Notifications
+        script: |
+          # O `cap add ios` cria o projeto SEM a capability de push. Sem ela o
+          # iOS não emite o evento 'registration', o push_app.js nunca recebe o
+          # token, e nada chega ao servidor -- sem erro nenhum no caminho.
+          #
+          # É por isso que havia 2423 aparelhos Android registrados e zero iOS:
+          # no Android a permissão basta, no iOS a capability é obrigatória.
+          #
+          # O entitlements precisa existir E ser referenciado no projeto; criar
+          # só o arquivo não adianta.
+          APPDIR="build/$PERFIL/ios/App"
+          ENT="$APPDIR/App/App.entitlements"
+
+          cat > "$ENT" <<'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+            "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>aps-environment</key>
+            <string>production</string>
+          </dict>
+          </plist>
+          PLIST
+
+          cd "$APPDIR"
+          # ruby + xcodeproj já vêm na imagem do Codemagic.
+          ruby -e "
+            require 'xcodeproj'
+            projeto = Xcodeproj::Project.open('App.xcodeproj')
+            alvo = projeto.targets.find { |t| t.name == 'App' }
+            alvo.build_configurations.each do |c|
+              c.build_settings['CODE_SIGN_ENTITLEMENTS'] = 'App/App.entitlements'
+            end
+            attrs = projeto.root_object.attributes['TargetAttributes'] ||= {}
+            attrs[alvo.uuid] ||= {}
+            attrs[alvo.uuid]['SystemCapabilities'] =
+              { 'com.apple.Push' => { 'enabled' => 1 } }
+            projeto.save
+            puts 'Capability de push habilitada.'
+          "
+
+      - name: Permissões no Info.plist
+        script: |
+          # As descrições vêm do versao.json, gerado pelo perfil. O texto
+          # aparece para o cliente quando o iOS pede autorização, e a Apple
+          # rejeita descrição genérica.
+          #
+          # Sem isto, o chat do portal reprova na revisão: ele manda áudio,
+          # imagem e arquivo, e cada um exige a sua chave.
+          PLIST="build/$PERFIL/ios/App/App/Info.plist"
+          VERSAO="build/$PERFIL/versao.json"
+
+          node -e "
+            const fs = require('fs');
+            const { execFileSync } = require('child_process');
+            const v = JSON.parse(fs.readFileSync('$VERSAO', 'utf8'));
+            const p = v.permissoesIos || {};
+            for (const [chave, texto] of Object.entries(p)) {
+              try {
+                execFileSync('/usr/libexec/PlistBuddy',
+                  ['-c', 'Add :' + chave + ' string ' + texto, '$PLIST']);
+              } catch (e) {
+                execFileSync('/usr/libexec/PlistBuddy',
+                  ['-c', 'Set :' + chave + ' ' + texto, '$PLIST']);
+              }
+              console.log('  ' + chave);
+            }
+          "
+
+          # Versão e build do iOS, independentes do Android. O app publicado
+          # está em 400000; qualquer envio precisa ser MAIOR que isso.
+          IOS_VERSION=$(node -p "require('./$VERSAO').iosVersion")
+          IOS_BUILD=$(node -p "require('./$VERSAO').iosBuild")
+
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $IOS_VERSION" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $IOS_BUILD" "$PLIST"
+
+          # Trava em retrato. O template do Capacitor traz as quatro
+          # orientações; apagar o array e recriar só com portrait é mais seguro
+          # que remover item por item, porque o índice muda a cada remoção.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
+          # O iPad EXIGE as quatro. A Apple recusa o envio com o erro 90474:
+          # "you need to include all of the ... orientations to support iPad
+          # multitasking". Restringir aqui, como no iPhone, bloqueia a
+          # publicação -- testado.
+          #
+          # Na prática não muda nada para nós: o app não é publicado para iPad,
+          # e no iPhone quem manda é a chave acima.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:0 string UIInterfaceOrientationPortrait" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:1 string UIInterfaceOrientationPortraitUpsideDown" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:2 string UIInterfaceOrientationLandscapeLeft" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:3 string UIInterfaceOrientationLandscapeRight" "$PLIST"
+
+          # Trava em retrato. O template do Capacitor traz as quatro
+          # orientações; apagar o array e recriar só com portrait é mais seguro
+          # que remover item por item, porque o índice muda a cada remoção.
+          #
+          # Sem plugin: é o mesmo caminho do Android, atributo nativo da
+          # plataforma. Plugin traria pod novo e mais uma peça para dar errado.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
+          # iPad usa uma chave própria. Mesmo sem publicar para iPad, deixá-la
+          # com as quatro faria o app rodar deitado no iPad em modo compatível.
+          /usr/libexec/PlistBuddy -c "Delete :UISupportedInterfaceOrientations~ipad" "$PLIST" 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad array" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :UISupportedInterfaceOrientations~ipad:0 string UIInterfaceOrientationPortrait" "$PLIST"
+
+          echo "--- Info.plist ---"
+          /usr/libexec/PlistBuddy -c "Print" "$PLIST" | head -40
+
+      - name: Ícones
+        script: |
+          # O montar.js gera ícones para Android. Para iOS, o @capacitor/assets
+          # deriva todos os tamanhos do assets-{perfil}/icon.png que já está no
+          # repositório.
+          cd "build/$PERFIL"
+          mkdir -p assets
+          cp "../../assets-$PERFIL/icon.png" assets/icon.png
+          cp "../../assets-$PERFIL/splash.png" assets/splash.png 2>/dev/null || true
+          npx @capacitor/assets generate --ios || \
+            echo "AVISO: geração de ícones falhou; o build segue com os padrões do Capacitor."
+
+      - name: Build number
+        script: |
+          # Se já houver envio com este build number, a Apple recusa. Pegar o
+          # último do TestFlight e somar 1 evita descobrir isso no fim.
+          cd "build/$PERFIL/ios/App"
+          ULTIMO=$(app-store-connect get-latest-testflight-build-number "$APP_APPLE_ID" 2>/dev/null || echo "0")
+          PROXIMO=$(($ULTIMO + 1))
+          echo "Último no TestFlight: $ULTIMO — usando: $PROXIMO"
+          agvtool new-version -all "$PROXIMO"
+
+      - name: Assinatura
+        script: |
+          # Cria ou reaproveita o provisioning profile pela chave da Apple.
+          # Era isto que exigia Xcode local — e o Mac mini 2014 não roda o
+          # Xcode 15+ que a Apple passou a exigir.
+          keychain initialize
+
+          # A chave privada é criada AQUI, e é ela que faltava. Sem chave, o
+          # fetch-signing-files não consegue gerar nem salvar o certificado --
+          # e o log diz "Cannot save Signing Certificates without certificate
+          # private key" no meio de mensagens de sucesso, fácil de não ver.
+          #
+          # O erro só aparece dois passos depois, como "requires a provisioning
+          # profile", apontando para o lugar errado.
+          # A chave privada precisa existir ANTES de pedir o certificado: é ela
+          # que assina o CSR enviado à Apple. Sem ela o log diz "Cannot create
+          # resource without certificate private key" e nada é criado.
+          #
+          # O --create do fetch-signing-files gera a chave sozinho quando ela
+          # falta, então o create-certificate separado era desnecessário -- e
+          # foi ele que falhou. O || echo mascarou a falha como "já existe".
+          # O perfil precisa ser gerado DEPOIS da capability: um perfil criado
+          # sem push não autoriza push, e o build passa sem reclamar.
+          app-store-connect fetch-signing-files "$BUNDLE_ID" \
+            --type IOS_APP_STORE \
+            --create \
+            --certificate-key=@env:CERTIFICATE_PRIVATE_KEY \
+            --strict-match-identifier
+
+          keychain add-certificates
+
+          # O --project é obrigatório: sem ele o use-profiles procura o projeto
+          # no diretório atual, que é a raiz do repositório, e não acha nada.
+          # O perfil é criado com sucesso e nunca chega ao Xcode -- o build
+          # falha depois, com "requires a provisioning profile", e o erro
+          # aponta para o passo errado.
+          xcode-project use-profiles \
+            --project "build/$PERFIL/ios/App/App.xcodeproj"
+
+      - name: Conferir entitlements
+        script: |
+          # O APNs aceita register() e não responde nada quando o binário não
+          # tem aps-environment. Nem token, nem erro -- é o que o diagnóstico
+          # no aparelho mostrou.
+          #
+          # O entitlements é escrito antes da assinatura, mas o use-profiles
+          # pode sobrescrever CODE_SIGN_ENTITLEMENTS com o do perfil.
+          echo "--- App.entitlements ---"
+          cat "build/$PERFIL/ios/App/App/App.entitlements" || echo "AUSENTE"
+
+          echo "--- CODE_SIGN_ENTITLEMENTS no projeto ---"
+          grep -n "CODE_SIGN_ENTITLEMENTS" \
+            "build/$PERFIL/ios/App/App.xcodeproj/project.pbxproj" || echo "NAO REFERENCIADO"
+
+      - name: Compilar
+        script: |
+          xcode-project build-ipa \
+            --workspace "$XCODE_WORKSPACE" \
+            --scheme "$XCODE_SCHEME"
+
+      - name: Entitlements no binário
+        script: |
+          # Lê o que REALMENTE ficou no app assinado. É a única forma de saber
+          # se o aps-environment sobreviveu à assinatura -- o log do xcodebuild
+          # não menciona entitlements nem quando dá certo, nem quando falha.
+          # Sem -maxdepth: o .xcarchive tem sufixo aleatório no nome e o App.app
+          # fica em Products/Applications, mais fundo que 3 níveis.
+          APP=$(find /Users/builder/clone/build/ios/xcarchive -name "App.app" -type d 2>/dev/null | head -1)
+          [ -z "$APP" ] && APP=$(find / -name "App.app" -type d -path "*xcarchive*" 2>/dev/null | head -1)
+
+          echo "App encontrado: ${APP:-NENHUM}"
+
+          if [ -n "$APP" ]; then
+            echo "--- entitlements do binário assinado ---"
+            codesign -d --entitlements - "$APP" 2>&1 | head -30
+          else
+            echo "Nenhum App.app localizado. Conteúdo de build/ios:"
+            ls -R /Users/builder/clone/build/ios 2>/dev/null | head -30
+          fi
+
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - ios-projeto.tar.gz
+
+    publishing:
+      app_store_connect:
+        auth: integration
+        # Sobe para o TestFlight, NÃO para a App Store.
+        #
+        # submit_to_app_store fica falso de propósito: publicação é decisão
+        # comercial, e um yaml não deve mandar app para revisão sozinho.
+        # Depois de validar no TestFlight, promova pelo painel.
+        submit_to_testflight: true
+        submit_to_app_store: false
+
+      email:
+        recipients:
+          - raphael.lacerda.rocha@gmail.com
+        notify:
+          success: true
+          failure: true
